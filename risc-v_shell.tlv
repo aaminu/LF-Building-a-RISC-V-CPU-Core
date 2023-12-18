@@ -22,6 +22,7 @@
    m4_asm(ADDI, x14, x0, 0)             // Initialize sum register a4 with 0
    m4_asm(ADDI, x12, x0, 1010)          // Store count of 10 in register a2.
    m4_asm(ADDI, x13, x0, 1)             // Initialize loop count register a3 with 0
+   m4_asm(ADDI, x0, x0, 1110)                
    // Loop:
    m4_asm(ADD, x14, x13, x14)           // Incremental summation
    m4_asm(ADDI, x13, x13, 1)            // Increment loop count by 1
@@ -44,12 +45,14 @@
    
    
    // Program Counter
-   $next_pc[31:0] = $reset ? 0 : (>>1$next_pc + 4);
+   $next_pc[31:0] = $reset ? 0 : 
+                    $taken_br ? $br_tgt_pc
+                    : (>>1$next_pc + 4);
    $pc[31:0] = >>1$next_pc;
    
    `READONLY_MEM($pc, $$instr[31:0]);
 
-   // Opcode type
+   // Opcode type validators
    $is_u_instr = $instr[6:2] ==? 5'b0x101; 
    $is_b_instr = $instr[6:2] == 5'b11000;
    $is_j_instr = $instr[6:2] == 5'b11011;
@@ -59,17 +62,18 @@
    
    // Opcode and reg field
    $opcode[6:0] = $instr[6:0];
-   $rd[4:0] = $instr[11:7];
+   $rd[4:0] = $instr[11:7]; // Destination register
    $funct3[2:0] = $instr[14:12];
-   $rs1[4:0] = $instr[19:15];
-   $rs2[4:0] = $instr[24:20];
+   $rs1[4:0] = $instr[19:15]; //Input register 1
+   $rs2[4:0] = $instr[24:20]; //Input register 2
    
-   $rd_valid = $is_r_instr || $is_i_instr || $is_u_instr || $is_j_instr;
+   $rd_valid = ($is_r_instr || $is_i_instr || $is_u_instr || $is_j_instr) && ($rd != 5'b00000);
    $funct3_valid = $is_r_instr || $is_i_instr || $is_s_instr || $is_b_instr;
    $rs1_valid = $is_r_instr || $is_i_instr || $is_s_instr || $is_b_instr;
    $rs2_valid = $is_r_instr || $is_s_instr || $is_b_instr;
    $imm_valid = !$is_r_instr;
-
+   
+   
    `BOGUS_USE($rd $rd_valid $rs1 $rs1_valid $rs2 $rs2_valid $funct3 $funct3_valid $imm_valid);
 
    // Immediate value
@@ -79,8 +83,8 @@
                 $is_u_instr ? {$instr[31:12], {12{1'b0}}} :
                 $is_j_instr ? { {12{$instr[31]}}, $instr[19:12], $instr[20], $instr[30:21], 1'b0} :
                               32'b0; //default
-
-   // Instructions
+   
+   // Instructions validators
    $dec_bits[10:0] = {$instr[30],$funct3,$opcode};
    $is_beq = $dec_bits ==? 11'bx_000_1100011;
    $is_bne = $dec_bits ==? 11'bx_001_1100011;
@@ -93,12 +97,29 @@
 
    `BOGUS_USE($is_add $is_addi $is_beq $is_bge $is_bgeu $is_blt $is_bltu $is_bne);
 
+   //Simple ALU for ADDI and ADD
+   $result[31:0] = $is_addi ? $src1_value + $imm :
+                   $is_add ? $src1_value + $src2_value :
+                   32'b0;
+
+   //Branching
+   $taken_br = $is_beq ? $src1_value == $src2_value :
+               $is_bne ? $src1_value != $src2_value :
+               $is_blt ? ($src1_value < $src2_value) ^ ($src1_value[31] != $src2_value[31]) :
+               $is_bge ? ($src1_value >= $src2_value) ^ ($src1_value[31] != $src2_value[31]) :
+               $is_bltu ? $src1_value < $src2_value :
+               $is_bgeu ? $src1_value >= $src2_value :
+               1'b0;
+   
+   $br_tgt_pc[31:0] = $pc + $imm;
+   
+
 
    // Assert these to end simulation (before Makerchip cycle limit).
-   *passed = 1'b0;
+   m4+tb()
    *failed = *cyc_cnt > M4_MAX_CYC;
    
-   //m4+rf(32, 32, $reset, $wr_en, $wr_index[4:0], $wr_data[31:0], $rd1_en, $rd1_index[4:0], $rd1_data, $rd2_en, $rd2_index[4:0], $rd2_data)
+   m4+rf(32, 32, $reset, $rd_valid, $rd[4:0], $result[31:0], $rs1_valid, $rs1[4:0], $src1_value, $rs2_valid, $rs2[4:0], $src2_value)
    //m4+dmem(32, 32, $reset, $addr[4:0], $wr_en, $wr_data[31:0], $rd_en, $rd_data)
    m4+cpu_viz()
 \SV
