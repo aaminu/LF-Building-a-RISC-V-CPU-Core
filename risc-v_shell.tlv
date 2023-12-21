@@ -118,6 +118,14 @@
    $is_sra = $dec_bits ==? 11'b1_101_0110011;
    $is_or = $dec_bits ==? 11'b0_110_0110011;
    $is_and = $dec_bits ==? 11'b0_111_0110011;
+   $is_lb = $dec_bits ==? 11'bx_000_0000011;
+   $is_lh = $dec_bits ==? 11'bx_001_0000011;
+   $is_lw = $dec_bits ==? 11'bx_010_0000011;
+   $is_lbu = $dec_bits ==? 11'bx_100_0000011;
+   $is_lhu = $dec_bits ==? 11'bx_101_0000011;
+   $is_sb = $dec_bits ==? 11'bx_000_0100011;
+   $is_sh = $dec_bits ==? 11'bx_001_0100011;
+   $is_sw = $dec_bits ==? 11'bx_010_0100011;
 
    `BOGUS_USE($is_add $is_addi $is_beq $is_bge $is_bgeu $is_blt $is_bltu $is_bne);
 
@@ -132,11 +140,15 @@
    $sra_rslt[63:0] = $sext_src1 >> $src2_value[4:0];
    $srai_rslt[63:0] = $sext_src1 >> $imm[4:0];
 
+
+   //Load instructions
+   $is_load = $is_lb || $is_lh || $is_lw || $is_lbu || $is_lhu;
+
    //ALU
    $result[31:0] = $is_andi ? $src1_value & $imm :
                    $is_ori ? $src1_value | $imm :
                    $is_xori ? $src1_value ^ $imm :
-                   $is_addi ? $src1_value + $imm :
+                   ($is_addi || $is_load || $is_s_instr) ? $src1_value + $imm :
                    $is_slli ? $src1_value << $imm[5:0] :
                    $is_srli ? $src1_value >> $imm[5:0] :
                    $is_and ? $src1_value & $src2_value :
@@ -171,14 +183,13 @@
    // Jumps
    $jalr_tgt_pc[31:0] = $src1_value + $imm;
    
-   $is_load = $is_s_instr ? 1'b1 : 1'b0;
 
    // Assert these to end simulation (before Makerchip cycle limit).
    m4+tb()
    *failed = *cyc_cnt > M4_MAX_CYC;
    
-   m4+rf(32, 32, $reset, $rd_valid, $rd[4:0], $result[31:0], $rs1_valid, $rs1[4:0], $src1_value, $rs2_valid, $rs2[4:0], $src2_value)
-   //m4+dmem(32, 32, $reset, $addr[4:0], $wr_en, $wr_data[31:0], $rd_en, $rd_data)
+   m4+rf(32, 32, $reset, $rd_valid, $rd[4:0], ($is_load ? $ld_data : $result[31:0]), $rs1_valid, $rs1[4:0], $src1_value, $rs2_valid, $rs2[4:0], $src2_value)
+   m4+dmem(32, 32, $reset, $result[4:0], $is_s_instr, $src2_value, $is_load, $ld_data)
    m4+cpu_viz()
 \SV
    endmodule
